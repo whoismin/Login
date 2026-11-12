@@ -1,0 +1,56 @@
+# Nome que aparece na aba "Actions" do GitHub
+name: CI/CD - Login API
+
+# Gatilho: toda vez que houver push na branch main
+on:
+  push:
+    branches: [main]
+
+# Permissão do GITHUB_TOKEN: somente leitura do repositório
+permissions:
+  contents: read
+
+env:
+  # Nome da imagem no Docker Hub: usuario/login-api
+  IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/login-api
+
+jobs:
+  # ---------------------- JOB 1: BUILD ----------------------
+  build:
+    runs-on: ubuntu-latest   # máquina Ubuntu (arquitetura amd64) do GitHub
+    steps:
+      - name: Checkout do código (última versão do repositório)
+        uses: actions/checkout@v4
+
+      - name: Gerar arquivo de build com a data atual
+        run: |
+          echo "Build em $(date -u +'%d/%m/%Y %H:%M:%S') UTC - commit ${{ github.sha }}" \
+            | tee springframework/src/main/resources/static/build-info.txt
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no Docker Hub (usuario e token vindos dos secrets)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build (GraalVM, amd64) e push para o Docker Hub
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+  # ---------------------- JOB 2: DEPLOY ----------------------
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build             # só executa se o build terminar com sucesso
+    steps:
+      - name: Disparar novo deploy no Render
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
